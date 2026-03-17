@@ -302,197 +302,115 @@ scene.add(sunLight);
 const hemiLight=new THREE.HemisphereLight(0xff6633,0x330500,0.4);
 scene.add(hemiLight);
 
-// ========== PROCEDURAL TERRAIN HEIGHT ==========
-// Simple noise function for terrain generation
+// ========== TERRAIN HEIGHT (lightweight) ==========
 function hash(x,z){const n=Math.sin(x*127.1+z*311.7)*43758.5453;return n-Math.floor(n);}
 function lerp(a,b,t){return a+(b-a)*t;}
-function smoothstep(t){return t*t*(3-2*t);}
 function noise2D(x,z){
   const ix=Math.floor(x),iz=Math.floor(z);
   const fx=x-ix,fz=z-iz;
-  const sx=smoothstep(fx),sz=smoothstep(fz);
-  const a=hash(ix,iz),b=hash(ix+1,iz),c=hash(ix,iz+1),d=hash(ix+1,iz+1);
-  return lerp(lerp(a,b,sx),lerp(c,d,sx),sz);
+  const sx=fx*fx*(3-2*fx),sz=fz*fz*(3-2*fz);
+  return lerp(lerp(hash(ix,iz),hash(ix+1,iz),sx),lerp(hash(ix,iz+1),hash(ix+1,iz+1),sx),sz);
 }
-function fbm(x,z,octaves=5){
-  let val=0,amp=1,freq=1,max=0;
-  for(let i=0;i<octaves;i++){val+=noise2D(x*freq,z*freq)*amp;max+=amp;amp*=.5;freq*=2;}
-  return val/max;
+function fbm(x,z){
+  return noise2D(x,z)+noise2D(x*2,z*2)*.5+noise2D(x*4,z*4)*.25;
 }
 
-// Crater function
-const craters=[];
-for(let i=0;i<25;i++){
-  craters.push({
-    x:(Math.random()-.5)*300,
-    z:(Math.random()-.5)*300,
-    r:3+Math.random()*12,
-    d:1+Math.random()*4,
-    rim:.3+Math.random()*.5
-  });
-}
-
-function getTerrainHeight(wx,wz){
-  // Base terrain with rolling hills
-  let h=fbm(wx*.015,wz*.015,5)*6;
-  // Large hills
-  h+=fbm(wx*.005+100,wz*.005+100,3)*12;
-  // Medium ridges
-  h+=Math.sin(wx*.02+wz*.015)*2;
-  // Fine detail
-  h+=fbm(wx*.08,wz*.08,3)*.8;
-
-  // Craters
-  for(const c of craters){
-    const dx=wx-c.x,dz=wz-c.z;
-    const dist=Math.sqrt(dx*dx+dz*dz);
-    if(dist<c.r*2){
-      const t=dist/c.r;
-      if(t<1){
-        // Inside crater: dip down
-        h-=c.d*(1-t*t);
-      }else if(t<1.4){
-        // Crater rim: rise up
-        const rt=(t-1)/.4;
-        h+=c.d*c.rim*Math.sin(rt*Math.PI);
-      }
-    }
-  }
+function getH(wx,wz){
+  let h=fbm(wx*.012,wz*.012)*8;
+  h+=Math.sin(wx*.02)*1.5+Math.cos(wz*.018)*1.5;
+  h+=noise2D(wx*.06,wz*.06)*.6;
   return h-1;
 }
 
-// Mars terrain mesh (larger, more detailed)
-const TERRAIN_SIZE=400;
-const TERRAIN_RES=160;
-const terrainGeo=new THREE.PlaneGeometry(TERRAIN_SIZE,TERRAIN_SIZE,TERRAIN_RES,TERRAIN_RES);
+// Terrain mesh - moderate resolution, static world-space
+const terrainGeo=new THREE.PlaneGeometry(300,300,80,80);
 const posAttr=terrainGeo.attributes.position;
 
-// We'll update terrain verts relative to camera in the game loop for infinite feel
-function updateTerrainMesh(camZ){
+function buildTerrain(oZ){
   for(let i=0;i<posAttr.count;i++){
     const lx=posAttr.getX(i);
-    const lz=posAttr.getY(i); // local Y = world Z for plane
-    const wz=lz+camZ; // world Z
-    posAttr.setZ(i,getTerrainHeight(lx,wz));
+    const lz=posAttr.getY(i)+oZ;
+    posAttr.setZ(i,getH(lx,lz));
   }
   posAttr.needsUpdate=true;
   terrainGeo.computeVertexNormals();
+  // Colors
+  let ca=terrainGeo.attributes.color;
+  if(!ca){
+    ca=new THREE.BufferAttribute(new Float32Array(posAttr.count*3),3);
+    terrainGeo.setAttribute('color',ca);
+  }
+  for(let i=0;i<posAttr.count;i++){
+    const h=posAttr.getZ(i);
+    const t=Math.max(0,Math.min(1,(h+4)/12));
+    ca.setXYZ(i,.32+t*.25,.11+t*.1,.05+t*.05);
+  }
+  ca.needsUpdate=true;
 }
+buildTerrain(0);
 
-updateTerrainMesh(0);
-
-// Vertex colors for terrain variety
-const terrainColors=new Float32Array(posAttr.count*3);
-for(let i=0;i<posAttr.count;i++){
-  const h=posAttr.getZ(i);
-  // Lower = darker red, higher = lighter sandy, craters = very dark
-  const t=Math.max(0,Math.min(1,(h+5)/15));
-  terrainColors[i*3]=.35+t*.25+Math.random()*.05;   // R
-  terrainColors[i*3+1]=.12+t*.1+Math.random()*.03;  // G
-  terrainColors[i*3+2]=.05+t*.05+Math.random()*.02; // B
-}
-terrainGeo.setAttribute('color',new THREE.BufferAttribute(terrainColors,3));
-
-const terrainMat=new THREE.MeshStandardMaterial({
-  vertexColors:true,roughness:0.95,metalness:0.05,flatShading:true
-});
+const terrainMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.95,metalness:.05,flatShading:true});
 const terrain=new THREE.Mesh(terrainGeo,terrainMat);
 terrain.rotation.x=-Math.PI/2;
-terrain.position.y=0;
 scene.add(terrain);
 
-// Mars rocks (more of them, varied)
-const rockGroup=new THREE.Group();
-for(let i=0;i<120;i++){
-  const s=.2+Math.random()*2.5;
-  const detail=Math.random()>.7?1:0;
-  const rockGeo=Math.random()>.5?
-    new THREE.DodecahedronGeometry(s,detail):
-    new THREE.IcosahedronGeometry(s,detail);
-  const shade=0x5b2a10+Math.floor(Math.random()*0x301000);
-  const rockMat=new THREE.MeshStandardMaterial({color:shade,roughness:.92,flatShading:true});
-  const rock=new THREE.Mesh(rockGeo,rockMat);
-  const rx=(Math.random()-.5)*200;
-  const rz=(Math.random()-.5)*200;
-  const ry=getTerrainHeight(rx,rz)+s*.3;
-  rock.position.set(rx,ry,rz);
-  rock.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
-  rockGroup.add(rock);
+// Rocks - placed in world, recycled when behind camera
+const rocks=[];
+const rockGeoCache=[
+  new THREE.DodecahedronGeometry(1,0),
+  new THREE.IcosahedronGeometry(1,0),
+  new THREE.OctahedronGeometry(1,0)
+];
+function makeRock(zBase){
+  const s=.3+Math.random()*2;
+  const geo=rockGeoCache[Math.floor(Math.random()*3)];
+  const mat=new THREE.MeshStandardMaterial({color:0x5b2a10+Math.floor(Math.random()*0x301000),roughness:.92,flatShading:true});
+  const m=new THREE.Mesh(geo,mat);
+  const rx=(Math.random()-.5)*60;
+  const rz=zBase-(Math.random()*80);
+  m.position.set(rx,getH(rx,rz)+s*.3,rz);
+  m.scale.setScalar(s);
+  m.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
+  scene.add(m);
+  return{mesh:m,z:rz};
 }
-scene.add(rockGroup);
-
-// Crater rim rocks (ring of rocks around bigger craters)
-craters.filter(c=>c.r>6).forEach(c=>{
-  const count=8+Math.floor(c.r);
-  for(let i=0;i<count;i++){
-    const a=i/count*Math.PI*2+Math.random()*.3;
-    const dist=c.r*(1.05+Math.random()*.2);
-    const s=.4+Math.random()*1.2;
-    const rg=new THREE.DodecahedronGeometry(s,0);
-    const rm=new THREE.MeshStandardMaterial({color:0x4a1808,roughness:.95,flatShading:true});
-    const rock=new THREE.Mesh(rg,rm);
-    const rx=c.x+Math.cos(a)*dist;
-    const rz=c.z+Math.sin(a)*dist;
-    rock.position.set(rx,getTerrainHeight(rx,rz)+s*.4,rz);
-    rock.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
-    rockGroup.add(rock);
-  }
-});
+for(let i=0;i<50;i++) rocks.push(makeRock(20-i*3));
 
 // Dust particles
-const dustCount=600;
+const dustCount=200;
 const dustGeo=new THREE.BufferGeometry();
 const dustPos=new Float32Array(dustCount*3);
-const dustVel=[];
 for(let i=0;i<dustCount;i++){
-  dustPos[i*3]=(Math.random()-.5)*120;
-  dustPos[i*3+1]=Math.random()*12+1;
-  dustPos[i*3+2]=(Math.random()-.5)*120;
-  dustVel.push({x:(Math.random()-.5)*.03,y:Math.random()*.003,z:(Math.random()-.5)*.03});
+  dustPos[i*3]=(Math.random()-.5)*60;
+  dustPos[i*3+1]=Math.random()*8+.5;
+  dustPos[i*3+2]=(Math.random()-.5)*60;
 }
 dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
-const dustMat=new THREE.PointsMaterial({size:.1,color:0xcc8855,transparent:true,opacity:.25,sizeAttenuation:true});
+const dustMat=new THREE.PointsMaterial({size:.08,color:0xcc8855,transparent:true,opacity:.2,sizeAttenuation:true});
 const dustPts=new THREE.Points(dustGeo,dustMat);
 scene.add(dustPts);
 
-// Distant mountains (bigger, more dramatic)
-const mtGroup=new THREE.Group();
-for(let i=0;i<20;i++){
-  const h=12+Math.random()*30;
-  const w=12+Math.random()*20;
-  const segs=4+Math.floor(Math.random()*4);
-  const mGeo=new THREE.ConeGeometry(w,h,segs);
-  // Deform mountain vertices for more natural look
-  const mp=mGeo.attributes.position;
-  for(let j=0;j<mp.count;j++){
-    mp.setX(j,mp.getX(j)+(Math.random()-.5)*w*.15);
-    mp.setZ(j,mp.getZ(j)+(Math.random()-.5)*w*.15);
-  }
-  mGeo.computeVertexNormals();
+// Mountains - far away, follow camera sideways only
+const mts=[];
+for(let i=0;i<12;i++){
+  const h=10+Math.random()*25;
+  const w=10+Math.random()*18;
+  const mGeo=new THREE.ConeGeometry(w,h,4+Math.floor(Math.random()*3));
   const mMat=new THREE.MeshStandardMaterial({color:0x3a1205+Math.floor(Math.random()*0x100800),roughness:1,flatShading:true});
   const m=new THREE.Mesh(mGeo,mMat);
-  const a=Math.random()*Math.PI*2;
-  const d=90+Math.random()*80;
-  m.position.set(Math.cos(a)*d,h/2-4,Math.sin(a)*d);
-  m.rotation.y=Math.random()*Math.PI;
-  mtGroup.add(m);
+  const side=i<6?-1:1;
+  m.position.set(side*(60+Math.random()*40),h/2-4,(Math.random()-.5)*200);
+  scene.add(m);mts.push(m);
 }
-scene.add(mtGroup);
 
-// Mars sun (smaller than from Earth)
-const sunGeo=new THREE.SphereGeometry(3,16,16);
-const sunMeshMat=new THREE.MeshBasicMaterial({color:0xffddaa});
-const sun=new THREE.Mesh(sunGeo,sunMeshMat);
+// Sun (follows camera in sky)
+const sunGeo=new THREE.SphereGeometry(3,12,12);
+const sun=new THREE.Mesh(sunGeo,new THREE.MeshBasicMaterial({color:0xffddaa}));
 sun.position.set(60,70,40);
+sun.add(new THREE.Mesh(new THREE.SphereGeometry(5,12,12),new THREE.MeshBasicMaterial({color:0xffcc88,transparent:true,opacity:.1})));
 scene.add(sun);
-// Sun glow
-const sunGlowGeo=new THREE.SphereGeometry(5,16,16);
-const sunGlowMat=new THREE.MeshBasicMaterial({color:0xffcc88,transparent:true,opacity:0.12});
-sun.add(new THREE.Mesh(sunGlowGeo,sunGlowMat));
 
-// Terrain update throttle
-let lastTerrainUpdate=0;
-const TERRAIN_UPDATE_INTERVAL=500; // ms
+let lastTerrainZ=0;
 
 // ========== RAYCASTER ==========
 const raycaster=new THREE.Raycaster();
@@ -1016,60 +934,61 @@ function gameLoop(){
   const rawDt=Math.min((now-lastFrame)/1000,.1);lastFrame=now;
 
   if(!gameActive){
-    // Idle animation
-    const t=now*.001;
-    dustGeo.attributes.position.needsUpdate=true;
     renderer.render(scene,camera);return;
   }
 
   const dt=rawDt*gameSpeed;
 
-  // Move forward
+  // Move forward in world space
   playerZ-=moveSpeed*dt;
   camera.position.z=playerZ;
 
-  // Terrain follows camera (infinite scrolling feel)
-  terrain.position.z=playerZ;
-
-  // Update terrain mesh periodically for infinite terrain
-  if(now-lastTerrainUpdate>TERRAIN_UPDATE_INTERVAL){
-    lastTerrainUpdate=now;
-    updateTerrainMesh(playerZ);
-    // Update terrain vertex colors too
-    const pa=terrainGeo.attributes.position;
-    const ca=terrainGeo.attributes.color.array;
-    for(let i=0;i<pa.count;i++){
-      const h=pa.getZ(i);
-      const t=Math.max(0,Math.min(1,(h+5)/15));
-      ca[i*3]=.35+t*.25; ca[i*3+1]=.12+t*.1; ca[i*3+2]=.05+t*.05;
-    }
-    terrainGeo.attributes.color.needsUpdate=true;
+  // Rebuild terrain when moved far enough (tile scrolling)
+  if(Math.abs(playerZ-lastTerrainZ)>60){
+    lastTerrainZ=playerZ;
+    buildTerrain(playerZ);
   }
+  terrain.position.z=playerZ; // keep terrain centered on player
 
-  // Camera follows terrain height (astronaut walks on surface)
-  const camTerrainH=getTerrainHeight(camera.position.x,playerZ);
-  const targetCamY=camTerrainH+2.5; // astronaut eye height
-  camera.position.y+=(targetCamY-camera.position.y)*.08; // smooth lerp
+  // Camera Y follows terrain smoothly
+  const camH=getH(0,playerZ);
+  const targetY=camH+2.5;
+  camera.position.y+=(targetY-camera.position.y)*.12;
 
-  // Slight camera tilt based on terrain slope (walking feel)
-  const hAhead=getTerrainHeight(camera.position.x,playerZ-2);
-  const slopeAngle=Math.atan2(hAhead-camTerrainH,2);
-  camera.rotation.x+=(slopeAngle*.3-camera.rotation.x)*.05;
+  // Gentle slope tilt
+  const hA=getH(0,playerZ-1.5);
+  const slope=Math.atan2(hA-camH,1.5)*.2;
+  camera.rotation.x+=(slope-camera.rotation.x)*.06;
 
-  // Head bob while walking
-  const bobSpeed=now*.004;
-  camera.position.y+=Math.sin(bobSpeed)*.06;
-  camera.position.x=Math.sin(bobSpeed*.5)*.08;
+  // Subtle head bob
+  const bob=now*.003;
+  camera.position.y+=Math.sin(bob)*.04;
+  camera.position.x=Math.sin(bob*.5)*.05;
 
-  // Move rocks and mountains with camera so they stay around
-  rockGroup.position.z=playerZ;
-  mtGroup.position.z=playerZ;
+  // Recycle rocks that fell behind
+  rocks.forEach(r=>{
+    if(r.z>playerZ+20){
+      r.z=playerZ-60-Math.random()*40;
+      const rx=(Math.random()-.5)*60;
+      r.mesh.position.set(rx,getH(rx,r.z)+r.mesh.scale.x*.3,r.z);
+    }
+  });
+
+  // Dust follows camera loosely
   dustPts.position.z=playerZ;
-  sun.position.z=playerZ+40;
+
+  // Sky objects follow camera (infinitely far away feeling)
   skyMesh.position.z=playerZ;
+  sun.position.z=playerZ+40;
   earth.position.z=playerZ-80;
   phobos.position.z=playerZ-60;
-  phobos.rotation.y+=rawDt*0.2;
+  phobos.rotation.y+=rawDt*.2;
+
+  // Mountains follow on Z only (always on horizon)
+  mts.forEach(m=>{
+    if(m.position.z>playerZ+100) m.position.z-=300;
+    if(m.position.z<playerZ-200) m.position.z+=300;
+  });
 
   // Timer
   if(gameMode==='blitz'){timeLeft-=dt;if(timeLeft<=0){timeLeft=0;endGame();return;}
@@ -1164,20 +1083,10 @@ function gameLoop(){
     if(r.life<=0){scene.remove(r.mesh);r.mesh.material.dispose();r.mesh.geometry.dispose();rings.splice(i,1);}
   }
 
-  // Dust
-  const dp=dustGeo.attributes.position.array;
-  for(let i=0;i<dustCount;i++){
-    dp[i*3]+=dustVel[i].x;dp[i*3+1]+=dustVel[i].y;dp[i*3+2]+=dustVel[i].z;
-    if(dp[i*3+1]>15){dp[i*3+1]=0;dp[i*3+2]=camera.position.z-50+Math.random()*100;}
-    // Keep dust near camera
-    if(Math.abs(dp[i*3+2]-camera.position.z)>50)dp[i*3+2]=camera.position.z-(Math.random()*50);
-  }
-  dustGeo.attributes.position.needsUpdate=true;
-
   // Camera shake
   if(screenShake.i>0){
-    camera.position.x=(Math.random()-.5)*screenShake.i*.05;
-    camera.position.y=3+(Math.random()-.5)*screenShake.i*.05;
+    camera.position.x+=(Math.random()-.5)*screenShake.i*.04;
+    camera.position.y+=(Math.random()-.5)*screenShake.i*.04;
     screenShake.i*=.88;if(screenShake.i<.3){screenShake.i=0;camera.position.x=0;camera.position.y=3;}
   }
 
