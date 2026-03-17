@@ -106,19 +106,24 @@ canvas#gc{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;touch-act
 .snd{position:fixed;top:10px;right:10px;z-index:110;font-size:clamp(16px,4vw,22px);background:none;border:none;cursor:pointer;opacity:.4;padding:8px}
 .snd:hover,.snd:active{opacity:.8}
 
-/* Touch crosshair */
-.touch-cross{position:fixed;z-index:99;pointer-events:none;width:50px;height:50px;transform:translate(-50%,-50%);display:none}
-.touch-cross::before,.touch-cross::after{content:'';position:absolute;background:var(--cyan);box-shadow:0 0 8px var(--cyan);border-radius:1px}
+/* Crosshair / Scope */
+.touch-cross{position:fixed;z-index:99;pointer-events:none;width:60px;height:60px;transform:translate(-50%,-50%);
+  display:block;transition:transform .08s}
+.touch-cross::before,.touch-cross::after{content:'';position:absolute;background:var(--cyan);
+  box-shadow:0 0 10px var(--cyan),0 0 20px rgba(0,255,242,.3);border-radius:1px}
 .touch-cross::before{width:2px;height:100%;left:50%;transform:translateX(-50%)}
 .touch-cross::after{height:2px;width:100%;top:50%;transform:translateY(-50%)}
-.touch-cross .td{position:absolute;width:6px;height:6px;background:var(--mag);border-radius:50%;top:50%;left:50%;transform:translate(-50%,-50%);box-shadow:0 0 8px var(--mag)}
-@media(pointer:coarse){body{cursor:default}.touch-cross{display:block}}
+.touch-cross .td{position:absolute;width:6px;height:6px;background:var(--mag);border-radius:50%;top:50%;left:50%;
+  transform:translate(-50%,-50%);box-shadow:0 0 8px var(--mag),0 0 16px var(--mag)}
+.touch-cross .scope-ring{position:absolute;top:4px;left:4px;right:4px;bottom:4px;border:1.5px solid rgba(0,255,242,.4);
+  border-radius:50%;box-shadow:0 0 6px rgba(0,255,242,.2)}
+body{cursor:none}
 </style>
 </head>
 <body>
 <canvas id="gc"></canvas>
 
-<div class="touch-cross" id="tcross"><div class="td"></div></div>
+<div class="touch-cross" id="tcross"><div class="td"></div><div class="scope-ring"></div></div>
 
 <div class="hud" id="hud" style="display:none">
   <div class="hud-l">
@@ -849,27 +854,168 @@ function getBounds() {
 
 function getSpawnRate() { return Math.max(280, (gameMode === 'zen' ? 1200 : 950) - wave * 70); }
 
+// ========== LASER BEAM SYSTEM ==========
+let laserBeams = [];
+const laserGunPos = new THREE.Vector3(0, -12, 20); // Gun position (bottom center, near camera)
+
+function createLaserBeam(fromPos, toPos, color = 0x00fff2, isHit = true) {
+  const dir = new THREE.Vector3().subVectors(toPos, fromPos);
+  const len = dir.length();
+
+  // Main beam
+  const beamGeo = new THREE.CylinderGeometry(0.04, 0.04, len, 8);
+  beamGeo.rotateX(Math.PI / 2);
+  beamGeo.translate(0, 0, len / 2);
+  const beamMat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.9
+  });
+  const beam = new THREE.Mesh(beamGeo, beamMat);
+  beam.position.copy(fromPos);
+  beam.lookAt(toPos);
+  scene.add(beam);
+
+  // Outer glow beam (wider, dimmer)
+  const glowGeo = new THREE.CylinderGeometry(0.15, 0.15, len, 8);
+  glowGeo.rotateX(Math.PI / 2);
+  glowGeo.translate(0, 0, len / 2);
+  const glowMat = new THREE.MeshBasicMaterial({
+    color, transparent: true, opacity: 0.25
+  });
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.position.copy(fromPos);
+  glow.lookAt(toPos);
+  scene.add(glow);
+
+  // Muzzle flash at gun
+  const flashGeo = new THREE.SphereGeometry(0.4, 8, 8);
+  const flashMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 });
+  const flash = new THREE.Mesh(flashGeo, flashMat);
+  flash.position.copy(fromPos);
+  scene.add(flash);
+
+  // Impact flash at target
+  const impactGeo = new THREE.SphereGeometry(isHit ? 0.8 : 0.3, 8, 8);
+  const impactMat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
+  const impact = new THREE.Mesh(impactGeo, impactMat);
+  impact.position.copy(toPos);
+  scene.add(impact);
+
+  // Point light at impact
+  const impactLight = new THREE.PointLight(color, 3, 10);
+  impactLight.position.copy(toPos);
+  scene.add(impactLight);
+
+  // Muzzle light
+  const muzzleLight = new THREE.PointLight(color, 2, 8);
+  muzzleLight.position.copy(fromPos);
+  scene.add(muzzleLight);
+
+  laserBeams.push({
+    beam, glow, flash, impact, impactLight, muzzleLight,
+    life: 1, decay: isHit ? 0.04 : 0.06
+  });
+}
+
+function updateLaserBeams(dt) {
+  for (let i = laserBeams.length - 1; i >= 0; i--) {
+    const lb = laserBeams[i];
+    lb.life -= lb.decay;
+
+    lb.beam.material.opacity = lb.life * 0.9;
+    lb.glow.material.opacity = lb.life * 0.25;
+    lb.flash.material.opacity = lb.life;
+    lb.flash.scale.setScalar(1 + (1 - lb.life) * 2);
+    lb.impact.material.opacity = lb.life;
+    lb.impact.scale.setScalar(1 + (1 - lb.life) * 3);
+    lb.impactLight.intensity = lb.life * 3;
+    lb.muzzleLight.intensity = lb.life * 2;
+
+    if (lb.life <= 0) {
+      scene.remove(lb.beam); scene.remove(lb.glow);
+      scene.remove(lb.flash); scene.remove(lb.impact);
+      scene.remove(lb.impactLight); scene.remove(lb.muzzleLight);
+      lb.beam.geometry.dispose(); lb.beam.material.dispose();
+      lb.glow.geometry.dispose(); lb.glow.material.dispose();
+      lb.flash.geometry.dispose(); lb.flash.material.dispose();
+      lb.impact.geometry.dispose(); lb.impact.material.dispose();
+      laserBeams.splice(i, 1);
+    }
+  }
+}
+
+function playShoot() {
+  if (!audioCtx || !soundEnabled) return;
+  const t = audioCtx.currentTime;
+  // Pew sound
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+  o.connect(g); g.connect(audioCtx.destination);
+  o.type = 'sine';
+  o.frequency.setValueAtTime(2000, t);
+  o.frequency.exponentialRampToValueAtTime(400, t + 0.12);
+  g.gain.setValueAtTime(0.12, t);
+  g.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+  o.start(); o.stop(t + 0.12);
+  // Noise burst
+  const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.04, audioCtx.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+  const n = audioCtx.createBufferSource(); n.buffer = buf;
+  const g2 = audioCtx.createGain();
+  g2.gain.setValueAtTime(0.06, t); g2.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+  n.connect(g2); g2.connect(audioCtx.destination);
+  n.start(t); n.stop(t + 0.04);
+}
+
 // ========== INPUT ==========
 let touchMode = false;
 const tcross = document.getElementById('tcross');
+let aimX = innerWidth / 2, aimY = innerHeight / 2;
 
-function handlePointer(x, y) {
+function getGunWorldPos() {
+  // Gun is at bottom center of screen in world space
+  const ndc = new THREE.Vector2(0, -0.95);
+  const v = new THREE.Vector3(ndc.x, ndc.y, 0.5).unproject(camera);
+  const dir = v.sub(camera.position).normalize();
+  return camera.position.clone().add(dir.multiplyScalar(3));
+}
+
+function fireShot(x, y) {
   if (!gameActive) return;
   pointer.x = (x / innerWidth) * 2 - 1;
   pointer.y = -(y / innerHeight) * 2 + 1;
+
+  playShoot();
+
+  // Crosshair pulse
+  tcross.style.transform = 'translate(-50%,-50%) scale(1.3)';
+  setTimeout(() => { tcross.style.transform = 'translate(-50%,-50%) scale(1)'; }, 80);
 
   raycaster.setFromCamera(pointer, camera);
   const meshes = bubbles.filter(b => b.alive).map(b => b.mesh);
   const intersects = raycaster.intersectObjects(meshes, true);
 
+  const gunPos = getGunWorldPos();
+
   if (intersects.length > 0) {
     let hitMesh = intersects[0].object;
     while (hitMesh.parent && hitMesh.parent !== scene) hitMesh = hitMesh.parent;
     const bubble = bubbles.find(b => b.mesh === hitMesh && b.alive);
-    if (bubble) { hitBubble(bubble); return; }
+    if (bubble) {
+      const hitPoint = bubble.mesh.position.clone();
+      const color = bubble.cfg.color;
+      createLaserBeam(gunPos, hitPoint, color, true);
+      hitBubble(bubble);
+      return;
+    }
   }
 
-  // Miss
+  // Miss - beam goes to far point
+  const missDir = new THREE.Vector3(pointer.x, pointer.y, 0.5).unproject(camera);
+  const missTarget = camera.position.clone().add(
+    missDir.sub(camera.position).normalize().multiplyScalar(40)
+  );
+  createLaserBeam(gunPos, missTarget, 0xff2040, false);
+
   clicks++;
   if (combo > 0) combo = 0;
   if (gameMode === 'precision') { misses++; if (misses >= 3) { endGame(); return; } }
@@ -878,22 +1024,33 @@ function handlePointer(x, y) {
 
 canvas.addEventListener('pointerdown', e => {
   e.preventDefault();
+  aimX = e.clientX; aimY = e.clientY;
   if (e.pointerType === 'touch') {
     touchMode = true;
     tcross.style.left = e.clientX + 'px';
     tcross.style.top = e.clientY + 'px';
+    tcross.style.display = 'block';
   }
-  handlePointer(e.clientX, e.clientY);
+  fireShot(e.clientX, e.clientY);
 });
 
 canvas.addEventListener('pointermove', e => {
-  if (touchMode && e.pointerType === 'touch') {
+  aimX = e.clientX; aimY = e.clientY;
+  if (e.pointerType === 'touch') {
     tcross.style.left = e.clientX + 'px';
     tcross.style.top = e.clientY + 'px';
+  } else {
+    tcross.style.left = e.clientX + 'px';
+    tcross.style.top = e.clientY + 'px';
+    tcross.style.display = 'block';
   }
 });
 
 document.addEventListener('mousemove', e => {
+  aimX = e.clientX; aimY = e.clientY;
+  tcross.style.left = e.clientX + 'px';
+  tcross.style.top = e.clientY + 'px';
+  tcross.style.display = 'block';
   if (!touchMode) {
     tcross.style.display = 'none';
   }
@@ -1046,6 +1203,9 @@ function gameLoop() {
     }
   }
 
+  // Update laser beams
+  updateLaserBeams(rawDt);
+
   // Camera shake
   if (screenShake.i > 0) {
     camera.position.x = camBasePos.x + (Math.random() - 0.5) * screenShake.i * 0.06;
@@ -1091,10 +1251,16 @@ function endGame() {
   gameActive = false; stopMusic();
   document.getElementById('hud').style.display = 'none';
 
-  // Clean up remaining bubbles with pop
+  // Clean up remaining bubbles and laser beams
   bubbles.forEach(b => {
     if (b.alive) { b.alive = false; clearTimeout(b.timer); shrinkRemove(b); }
   });
+  laserBeams.forEach(lb => {
+    scene.remove(lb.beam); scene.remove(lb.glow);
+    scene.remove(lb.flash); scene.remove(lb.impact);
+    scene.remove(lb.impactLight); scene.remove(lb.muzzleLight);
+  });
+  laserBeams = [];
 
   const xpG = Math.round(score * 0.1 + hits * 2 + maxCombo * 3 + bossesKilled * 20);
   PD.xp += xpG; PD.totalHits += hits; PD.totalGames++;
