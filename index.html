@@ -133,7 +133,7 @@ R.toneMapping=THREE.ACESFilmicToneMapping;
 R.toneMappingExposure=1.0;
 
 const S=new THREE.Scene();
-S.fog=new THREE.Fog(0x6b3018,50,160);
+S.fog=new THREE.Fog(0x6b3018,80,200);
 
 const cam=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,.1,200);
 cam.position.set(0,2.5,0);
@@ -207,11 +207,11 @@ function sfxDmg(){tone('sawtooth',120,.25,.1);}
 
 // ========== ORB TYPES ==========
 const OT={
-  alien:  {color:0x44ee44,em:0x003300,r:.7,pts:10,spd:1},
-  fast:   {color:0xff44ff,em:0x330033,r:.5,pts:25,spd:2},
-  tank:   {color:0xff4422,em:0x330000,r:1,pts:15,spd:.6,hp:3},
-  gold:   {color:0xffcc22,em:0x332200,r:.6,pts:50,spd:1.2},
-  blue:   {color:0x44aaff,em:0x001133,r:.55,pts:30,spd:1.5},
+  alien:  {color:0x44ee44,em:0x004400,r:1.4,pts:10,spd:.4},
+  fast:   {color:0xff44ff,em:0x440044,r:1.1,pts:25,spd:.8},
+  tank:   {color:0xff4422,em:0x440000,r:2,pts:15,spd:.25,hp:3},
+  gold:   {color:0xffcc22,em:0x443300,r:1.2,pts:50,spd:.5},
+  blue:   {color:0x44aaff,em:0x001144,r:1.1,pts:30,spd:.6},
 };
 
 function spawnOrb(type,pos){
@@ -220,22 +220,27 @@ function spawnOrb(type,pos){
   const mat=new THREE.MeshStandardMaterial({color:cfg.color,emissive:cfg.em,emissiveIntensity:.6,roughness:.25,metalness:.1});
   const m=new THREE.Mesh(oG,mat);
   if(!pos){
-    const a=(Math.random()-.5)*12;
-    const d=30+Math.random()*25;
-    pos=new THREE.Vector3(a,1.5+Math.random()*2,cam.position.z-d);
+    const a=(Math.random()-.5)*16;
+    const d=18+Math.random()*15;
+    pos=new THREE.Vector3(a,1+Math.random()*3,cam.position.z-d);
   }
   m.position.copy(pos);m.scale.setScalar(cfg.r);
-  // Eyes
-  const eG=new THREE.SphereGeometry(.12,6,6);
-  const eM=new THREE.MeshBasicMaterial({color:0xffffff});
-  const e1=new THREE.Mesh(eG,eM);e1.position.set(-.25,.25,.85);m.add(e1);
-  const e2=e1.clone();e2.position.x=.25;m.add(e2);
+  // Eyes (big, glowing, creepy)
+  const eG=new THREE.SphereGeometry(.18,6,6);
+  const eM=new THREE.MeshBasicMaterial({color:type==='tank'?0xff4444:0xffff88});
+  const e1=new THREE.Mesh(eG,eM);e1.position.set(-.3,.2,.8);m.add(e1);
+  const e2=e1.clone();e2.position.x=.3;m.add(e2);
+  // Pupils
+  const pG=new THREE.SphereGeometry(.08,4,4);
+  const pM=new THREE.MeshBasicMaterial({color:0x000000});
+  const p1=new THREE.Mesh(pG,pM);p1.position.set(0,0,.06);e1.add(p1);
+  const p2=p1.clone();e2.add(p2);
   S.add(m);
   orbs.push({mesh:m,type,cfg,alive:true,hp:cfg.hp||1,wobble:Math.random()*10,spawnT:performance.now()});
 }
 
 function spawnWave(){
-  const n=3+wave*2;
+  const n=2+Math.floor(wave*1.5);
   const types=['alien','alien','alien','fast','gold','blue'];
   if(wave>=3)types.push('tank','tank');
   if(wave>=5)types.push('fast','fast','tank');
@@ -244,7 +249,7 @@ function spawnWave(){
       if(!gameActive)return;
       const t=types[Math.floor(Math.random()*types.length)];
       spawnOrb(t);
-    },i*400+Math.random()*300);
+    },i*600+Math.random()*500);
   }
 }
 
@@ -252,7 +257,7 @@ function spawnWave(){
 function fireLaser(from,to,color){
   const dir=new THREE.Vector3().subVectors(to,from);
   const len=dir.length();
-  const bG=new THREE.CylinderGeometry(.015,.015,len,4);
+  const bG=new THREE.CylinderGeometry(.03,.03,len,4);
   bG.rotateX(Math.PI/2);bG.translate(0,0,len/2);
   const beam=new THREE.Mesh(bG,new THREE.MeshBasicMaterial({color,transparent:true,opacity:.85}));
   beam.position.copy(from);beam.lookAt(to);S.add(beam);
@@ -397,17 +402,19 @@ function loop(){
 
   if(!gameActive){R.render(S,cam);return;}
 
-  // Auto-run forward
-  speed=8+dist*.005;
+  // Auto-run forward (slow so you have time to aim)
+  speed=4+dist*.003;
   dist+=speed*dt;
   cam.position.z-=speed*dt;
 
-  // A/D dodge
-  if(keys['KeyA']||keys['ArrowLeft'])cam.position.x+=(Math.max(cam.position.x-6,-6)-cam.position.x)*dt*5;
-  if(keys['KeyD']||keys['ArrowRight'])cam.position.x+=(Math.min(cam.position.x+6,6)-cam.position.x)*dt*5;
-  // Drift back to center slowly
+  // A/D dodge - smooth movement
+  const dodgeSpd=8;
+  if(keys['KeyA']||keys['ArrowLeft'])cam.position.x-=dodgeSpd*dt;
+  if(keys['KeyD']||keys['ArrowRight'])cam.position.x+=dodgeSpd*dt;
+  cam.position.x=Math.max(-8,Math.min(8,cam.position.x));
+  // Slow drift back to center
   if(!keys['KeyA']&&!keys['ArrowLeft']&&!keys['KeyD']&&!keys['ArrowRight']){
-    cam.position.x*=1-dt*1.5;
+    cam.position.x*=1-dt*.8;
   }
 
   // Head bob
@@ -435,10 +442,10 @@ function loop(){
     const o=orbs[i];
     if(!o.alive){orbs.splice(i,1);continue;}
 
-    // Move toward player
+    // Move toward player (slow, gives time to aim)
     const dir=cam.position.clone().sub(o.mesh.position).normalize();
-    const spd=o.cfg.spd*(1+wave*.05);
-    o.mesh.position.add(dir.multiplyScalar(spd*dt*3));
+    const spd=o.cfg.spd*(1+wave*.03);
+    o.mesh.position.add(dir.multiplyScalar(spd*dt*1.5));
 
     // Wobble
     o.mesh.position.y+=Math.sin(t*3+o.wobble)*.01;
@@ -450,7 +457,7 @@ function loop(){
 
     // Reached player?
     const d=o.mesh.position.distanceTo(cam.position);
-    if(d<2){
+    if(d<1.5){
       o.alive=false;lives--;
       sfxDmg();showDmg();doSplat(o.mesh.position.clone(),o.cfg.color,8);
       S.remove(o.mesh);o.mesh.traverse(c=>{if(c.material)c.material.dispose();});
