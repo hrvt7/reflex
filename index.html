@@ -92,7 +92,7 @@ canvas#gc{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;touch-act
   </div>
 </div>
 
-<div class="ctrl" id="ctrl">← A/D → &nbsp; SPACE = JUMP &nbsp; // &nbsp; SWIPE or TAP</div>
+<div class="ctrl" id="ctrl">← A/D → MOVE &nbsp; SPACE = JUMP &nbsp; F/CLICK = SHOOT &nbsp; // &nbsp; SWIPE + TAP</div>
 
 <button class="snd" id="sndBtn">🔊</button>
 
@@ -187,12 +187,12 @@ for(let x of[-4.5,-1.5,1.5,4.5]){
 // ========== SIDE ROCKS ==========
 const rockGeo=new THREE.DodecahedronGeometry(1,0);
 const sideRocks=[];
-for(let i=0;i<40;i++){
+for(let i=0;i<20;i++){
   const s=.5+Math.random()*2;
   const side=i%2===0?-1:1;
   const m=new THREE.Mesh(rockGeo,new THREE.MeshStandardMaterial({
     color:0x6b3015+Math.floor(Math.random()*0x200800),roughness:.92,flatShading:true}));
-  m.position.set(side*(7+Math.random()*5),s*.3,-i*8);
+  m.position.set(side*(7+Math.random()*5),s*.3,-i*14);
   m.scale.setScalar(s);m.rotation.set(Math.random()*3,Math.random()*3,0);
   scene.add(m);sideRocks.push(m);
 }
@@ -208,7 +208,7 @@ for(let i=0;i<8;i++){
 }
 
 // ========== DUST ==========
-const dustN=150;
+const dustN=80;
 const dustG=new THREE.BufferGeometry();
 const dustP=new Float32Array(dustN*3);
 for(let i=0;i<dustN;i++){dustP[i*3]=(Math.random()-.5)*20;dustP[i*3+1]=Math.random()*6+.5;dustP[i*3+2]=-Math.random()*60;}
@@ -223,19 +223,65 @@ let orbs=[],lastFrame=0,spawnDist=0;
 let soundEnabled=true,audioCtx;
 let highscore=parseInt(localStorage.getItem('marsRunHS')||'0');
 
-// ========== PLAYER ==========
-const playerMat=new THREE.MeshPhysicalMaterial({color:0xff8833,emissive:0x441100,emissiveIntensity:.5,
-  metalness:.3,roughness:.4,clearcoat:.6});
-const playerGeo=new THREE.SphereGeometry(.5,16,16);
-const player=new THREE.Mesh(playerGeo,playerMat);
-player.position.set(0,.8,0);
-player.add(new THREE.PointLight(0xff8833,.8,5));
+// ========== PLAYER (astronaut) ==========
+const player=new THREE.Group();
+// Body (torso)
+const bodyGeo=new THREE.CylinderGeometry(.3,.35,.8,8);
+const bodyMat=new THREE.MeshStandardMaterial({color:0xdddddd,roughness:.6,metalness:.2});
+const body=new THREE.Mesh(bodyGeo,bodyMat);body.position.y=.4;player.add(body);
+// Helmet
+const helmGeo=new THREE.SphereGeometry(.32,12,12);
+const helmMat=new THREE.MeshStandardMaterial({color:0xeeeeee,roughness:.3,metalness:.3});
+const helm=new THREE.Mesh(helmGeo,helmMat);helm.position.y=1;player.add(helm);
 // Visor
-const visorG=new THREE.SphereGeometry(.35,12,12,0,Math.PI*2,0,Math.PI/2);
-const visorM=new THREE.MeshPhysicalMaterial({color:0x88ccff,emissive:0x224466,metalness:.8,roughness:.1,clearcoat:1,transparent:true,opacity:.4});
-const visor=new THREE.Mesh(visorG,visorM);visor.position.y=.15;visor.rotation.x=-.3;
-player.add(visor);
+const visorG=new THREE.SphereGeometry(.28,10,10,0,Math.PI,0,Math.PI*.6);
+const visorM=new THREE.MeshStandardMaterial({color:0x88bbff,metalness:.9,roughness:.05,transparent:true,opacity:.5});
+const visorMesh=new THREE.Mesh(visorG,visorM);visorMesh.position.set(0,1.05,-.12);visorMesh.rotation.x=.2;player.add(visorMesh);
+// Backpack
+const bpGeo=new THREE.BoxGeometry(.4,.5,.25);
+const bpMat=new THREE.MeshStandardMaterial({color:0x888888,roughness:.7});
+const bp=new THREE.Mesh(bpGeo,bpMat);bp.position.set(0,.5,.25);player.add(bp);
+// Legs
+const legGeo=new THREE.CylinderGeometry(.1,.12,.5,6);
+const legMat=new THREE.MeshStandardMaterial({color:0xcccccc,roughness:.5});
+const legL=new THREE.Mesh(legGeo,legMat);legL.position.set(-.15,-.05,0);player.add(legL);
+const legR=new THREE.Mesh(legGeo,legMat);legR.position.set(.15,-.05,0);player.add(legR);
+// Arms
+const armGeo=new THREE.CylinderGeometry(.07,.08,.45,6);
+const armL=new THREE.Mesh(armGeo,new THREE.MeshStandardMaterial({color:0xcccccc,roughness:.5}));
+armL.position.set(-.4,.55,-.1);armL.rotation.z=.4;armL.rotation.x=-.3;player.add(armL);
+const armR=new THREE.Mesh(armGeo,new THREE.MeshStandardMaterial({color:0xcccccc,roughness:.5}));
+armR.position.set(.4,.45,-.15);armR.rotation.z=-.3;armR.rotation.x=-.5;player.add(armR);
+// Gun (right hand)
+const gunGeo=new THREE.BoxGeometry(.08,.08,.4);
+const gunMat=new THREE.MeshStandardMaterial({color:0x333333,metalness:.8,roughness:.3});
+const gun=new THREE.Mesh(gunGeo,gunMat);gun.position.set(.45,.35,-.35);player.add(gun);
+// Gun tip glow
+const gunTip=new THREE.PointLight(0xff6622,0,3);
+gunTip.position.set(.45,.35,-.55);player.add(gunTip);
+
+player.position.set(0,.3,0);
 scene.add(player);
+
+// ========== LASER BEAM ==========
+let lasers=[];
+function fireLaser(from,to,color=0xff6622){
+  const dir=new THREE.Vector3().subVectors(to,from);
+  const len=dir.length();
+  const bg=new THREE.CylinderGeometry(.02,.02,len,4);
+  bg.rotateX(Math.PI/2);bg.translate(0,0,len/2);
+  const beam=new THREE.Mesh(bg,new THREE.MeshBasicMaterial({color,transparent:true,opacity:.9}));
+  beam.position.copy(from);beam.lookAt(to);scene.add(beam);
+  const ig=new THREE.SphereGeometry(.2,6,6);
+  const impact=new THREE.Mesh(ig,new THREE.MeshBasicMaterial({color,transparent:true,opacity:1}));
+  impact.position.copy(to);scene.add(impact);
+  lasers.push({beam,impact,life:1});
+  // Muzzle flash
+  gunTip.intensity=2;gunTip.color.set(color);
+  setTimeout(()=>{gunTip.intensity=0;},60);
+}
+
+function playShoot(){snd('sine',1800,.08,.08);snd('square',1200,.05,.04);}
 
 // ========== ORB TYPES ==========
 const ORB={
@@ -265,17 +311,17 @@ function spawnOrb(type,laneIdx,z,yOff=0){
 
   // Spikes for red (danger)
   if(type==='red'){
-    for(let i=0;i<8;i++){
-      const sg=new THREE.ConeGeometry(.15,.5,4);
-      const sm=new THREE.MeshBasicMaterial({color:0xff4444,transparent:true,opacity:.6});
+    for(let i=0;i<4;i++){
+      const sg=new THREE.ConeGeometry(.15,.5,3);
+      const sm=new THREE.MeshBasicMaterial({color:0xff4444});
       const spike=new THREE.Mesh(sg,sm);
-      const a=i/8*Math.PI*2,p=Math.random()*Math.PI;
-      spike.position.set(Math.sin(p)*Math.cos(a)*1.2,Math.sin(p)*Math.sin(a)*1.2,Math.cos(p)*1.2);
+      const a=i/4*Math.PI*2;
+      spike.position.set(Math.cos(a)*1.2,0,Math.sin(a)*1.2);
       spike.lookAt(0,0,0);m.add(spike);
     }
   }
 
-  if(type!=='red'){m.add(new THREE.PointLight(cfg.color,.4,4));}
+  // No PointLight per orb for performance
 
   scene.add(m);
   orbs.push({mesh:m,type,cfg,lane:laneIdx,alive:true,yBase:.6+cfg.r+yOff,wobble:Math.random()*10});
@@ -369,18 +415,73 @@ function showBanner(text,color){
 function showDmg(){const d=document.getElementById('dmg');d.classList.add('show');setTimeout(()=>d.classList.remove('show'),200);}
 
 // ========== INPUT ==========
-let touchStartX=0,touchStartY=0;
+let touchStartX=0,touchStartY=0,keysDown={};
 
 function moveLeft(){if(targetLane>0)targetLane--;snd('sine',500,.04,.03);}
 function moveRight(){if(targetLane<2)targetLane++;snd('sine',500,.04,.03);}
 function jump(){if(!isJumping){isJumping=true;velY=9;playJump();}}
 
+function shoot(){
+  if(!gameActive)return;
+  playShoot();
+  // Find nearest orb in player's lane or close
+  const gunWorld=new THREE.Vector3(.45,.65,-.55);
+  player.localToWorld(gunWorld);
+  let nearest=null,nearDist=999;
+  orbs.forEach(o=>{
+    if(!o.alive)return;
+    const d=o.mesh.position.z;
+    if(d<-2&&d>-45&&Math.abs(o.mesh.position.x-player.position.x)<4){
+      if(-d<nearDist){nearDist=-d;nearest=o;}
+    }
+  });
+  if(nearest){
+    fireLaser(gunWorld,nearest.mesh.position.clone(),nearest.cfg.color);
+    hitOrb(nearest);
+  }else{
+    // Miss shot - laser goes forward
+    const missTarget=new THREE.Vector3(player.position.x,1,-40);
+    fireLaser(gunWorld,missTarget,0xff4422);
+  }
+}
+
+function hitOrb(o){
+  if(!o.alive)return;
+  o.alive=false;
+  const pos=o.mesh.position.clone();
+  if(o.cfg.action==='damage'){
+    // Shot a red one = bonus points!
+    score+=30*multi;collected++;
+    splat(pos,0xff2020,10);
+    playCollect();
+  }else{
+    collected++;
+    const pts=o.cfg.pts*multi;
+    score+=pts;
+    splat(pos,o.cfg.color,8);
+    playCollect();
+    if(o.cfg.action==='multi'){
+      multi=Math.min(multi+1,5);multiTimer=8;
+      showBanner(`×${multi} MULTI!`,'#44aaff');
+    }
+  }
+  scene.remove(o.mesh);
+  o.mesh.traverse(c=>{if(c.material)c.material.dispose();});
+  if(collected===25)showBanner('NICE!','#44ee44');
+  if(collected===50)showBanner('AMAZING!','#ffcc33');
+  if(collected===100)showBanner('LEGENDARY!','#cc44ff');
+  updateHUD();
+}
+
 document.addEventListener('keydown',e=>{
+  keysDown[e.code]=true;
   if(!gameActive){if(e.code==='Space'){e.preventDefault();startGame();}return;}
   if(e.code==='ArrowLeft'||e.code==='KeyA')moveLeft();
   if(e.code==='ArrowRight'||e.code==='KeyD')moveRight();
   if(e.code==='Space'||e.code==='ArrowUp'||e.code==='KeyW'){e.preventDefault();jump();}
+  if(e.code==='KeyF'||e.code==='Enter')shoot();
 });
+document.addEventListener('keyup',e=>{keysDown[e.code]=false;});
 
 canvas.addEventListener('touchstart',e=>{
   e.preventDefault();
@@ -392,23 +493,18 @@ canvas.addEventListener('touchend',e=>{
   if(!gameActive){startGame();return;}
   const t=e.changedTouches[0];
   const dx=t.clientX-touchStartX,dy=t.clientY-touchStartY;
-  if(Math.abs(dx)>30&&Math.abs(dx)>Math.abs(dy)){
+  if(Math.abs(dx)>40&&Math.abs(dx)>Math.abs(dy)){
     if(dx<0)moveLeft();else moveRight();
-  }else if(dy<-30){
+  }else if(dy<-40){
     jump();
   }else{
-    // Tap - jump
-    jump();
+    shoot(); // tap = shoot
   }
 },{passive:false});
 
 canvas.addEventListener('click',e=>{
   if(!gameActive)return;
-  // Click left/right side to move, center to jump
-  const x=e.clientX/innerWidth;
-  if(x<.33)moveLeft();
-  else if(x>.67)moveRight();
-  else jump();
+  shoot(); // click = shoot
 });
 
 // ========== GAME ==========
@@ -420,7 +516,8 @@ function startGame(){
 
   orbs.forEach(o=>scene.remove(o.mesh));orbs=[];
   splats.forEach(s=>scene.remove(s.mesh));splats=[];
-  player.position.set(0,.8,0);
+  player.position.set(0,.3,0);
+  lasers.forEach(l=>{scene.remove(l.beam);scene.remove(l.impact);});lasers=[];
 
   document.getElementById('startScr').classList.add('hidden');
   document.getElementById('endScr').classList.add('hidden');
@@ -470,7 +567,7 @@ function loop(){
   velY-=25*dt; // gravity
   playerY+=velY*dt;
   if(playerY<=0){playerY=0;velY=0;isJumping=false;}
-  player.position.y=.8+playerY;
+  player.position.y=.3+playerY;
 
   // Player rotation (visual only)
   player.rotation.z=(targetX-player.position.x)*-.5;
@@ -483,7 +580,7 @@ function loop(){
   if(gnd2.position.z>10){gnd2.position.z-=600;}
 
   // Scroll side rocks
-  sideRocks.forEach(r=>{r.position.z+=speed*dt;if(r.position.z>15)r.position.z-=320;});
+  sideRocks.forEach(r=>{r.position.z+=speed*dt;if(r.position.z>15)r.position.z-=280;});
 
   // Dust
   dust.position.z+=speed*dt;
@@ -509,47 +606,20 @@ function loop(){
     o.mesh.rotation.y+=dt*2;
     o.mesh.rotation.x+=dt;
 
-    // Collision with player
-    const dx=player.position.x-o.mesh.position.x;
-    const dy=player.position.y-o.mesh.position.y;
-    const dz=o.mesh.position.z;
-    const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
-    const hitR=o.cfg.r+.6;
-
-    if(d<hitR&&Math.abs(dz)<1.5){
-      o.alive=false;
-      const pos=o.mesh.position.clone();
-
-      if(o.cfg.action==='damage'){
-        // Hit red orb!
-        lives--;
-        playHit();showDmg();
-        splat(pos,0xff2020,15);
-        multi=1;
+    // Red orbs damage player on contact
+    if(o.type==='red'){
+      const dx=player.position.x-o.mesh.position.x;
+      const dy=player.position.y-o.mesh.position.y;
+      const dz=o.mesh.position.z;
+      const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if(d<1.2&&Math.abs(dz)<1.5){
+        o.alive=false;lives--;multi=1;
+        playHit();showDmg();splat(o.mesh.position.clone(),0xff2020,10);
         showBanner('DAMAGE!','#ff2020');
-        if(lives<=0){splat(pos,0xff2020,25);setTimeout(endGame,300);}
-      }else{
-        // Collect!
-        collected++;
-        const pts=o.cfg.pts*multi;
-        score+=pts;
-        playCollect();
-        splat(pos,o.cfg.color,8);
-
-        if(o.cfg.action==='multi'){
-          multi=Math.min(multi+1,5);
-          multiTimer=8;
-          showBanner(`×${multi} MULTI!`,'#44aaff');
-        }
-
-        // Milestone banners
-        if(collected===25)showBanner('NICE!','#44ee44');
-        if(collected===50)showBanner('AMAZING!','#ffcc33');
-        if(collected===100)showBanner('LEGENDARY!','#cc44ff');
+        scene.remove(o.mesh);o.mesh.traverse(c=>{if(c.material)c.material.dispose();});
+        if(lives<=0){setTimeout(endGame,300);}
+        updateHUD();
       }
-      scene.remove(o.mesh);
-      o.mesh.traverse(c=>{if(c.material)c.material.dispose();});
-      updateHUD();
     }
 
     // Remove if passed player
@@ -568,6 +638,28 @@ function loop(){
     s.vy-=12*dt;s.life-=dt*2;
     s.mesh.material.opacity=Math.max(0,s.life);
     if(s.life<=0){scene.remove(s.mesh);s.mesh.material.dispose();splats.splice(i,1);}
+  }
+
+  // Update lasers
+  for(let i=lasers.length-1;i>=0;i--){
+    const l=lasers[i];l.life-=dt*5;
+    l.beam.material.opacity=l.life;
+    l.impact.material.opacity=l.life;
+    l.impact.scale.setScalar(1+(1-l.life)*2);
+    if(l.life<=0){
+      scene.remove(l.beam);scene.remove(l.impact);
+      l.beam.geometry.dispose();l.beam.material.dispose();
+      l.impact.geometry.dispose();l.impact.material.dispose();
+      lasers.splice(i,1);
+    }
+  }
+
+  // Walking animation
+  const walkT=now*.008;
+  if(!isJumping){
+    legL.rotation.x=Math.sin(walkT)*.4;
+    legR.rotation.x=Math.sin(walkT+Math.PI)*.4;
+    armL.rotation.x=-.3+Math.sin(walkT+Math.PI)*.2;
   }
 
   // Camera follows player smoothly
