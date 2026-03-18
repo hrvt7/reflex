@@ -590,7 +590,7 @@ function spawnAlien(type,pos,lifeOvr,isChild){
     const dist=20+Math.random()*30;
     const spX=a*15;
     const spZ=camera.position.z-dist;
-    const groundH=getTerrainHeight(spX,spZ);
+    const groundH=getH(spX,spZ);
     pos=new THREE.Vector3(spX,groundH+2+Math.random()*3,spZ);
   }
   mesh.position.copy(pos);mesh.scale.setScalar(.01);
@@ -634,7 +634,7 @@ function spawnBoss(){
   if(!gameActive)return;
   const hp=4+Math.floor(wave/2);
   const bx=(Math.random()-.5)*15,bz=camera.position.z-35;
-  const pos=new THREE.Vector3(bx,getTerrainHeight(bx,bz)+4+Math.random()*3,bz);
+  const pos=new THREE.Vector3(bx,getH(bx,bz)+4+Math.random()*3,bz);
   const mat=MATS.boss.clone();
   const mesh=new THREE.Mesh(sphereGeo,mat);
   mesh.position.copy(pos);mesh.scale.setScalar(.01);
