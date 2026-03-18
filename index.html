@@ -7,19 +7,19 @@
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--cyan:#00fff2;--mag:#ff00ff;--yel:#ffe600;--red:#ff2040;--grn:#39ff14;--org:#ff8800;--bg:#0a0505}
+:root{--cyan:#ff9944;--mag:#ff5500;--yel:#ffcc44;--red:#ff2020;--grn:#66cc44;--org:#ff7722;--bg:#0a0504}
 body{background:var(--bg);overflow:hidden;font-family:'Orbitron',monospace;color:#fff;height:100vh;width:100vw;
   user-select:none;-webkit-user-select:none;touch-action:none;cursor:none}
 canvas#gc{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;touch-action:none}
 
 /* Helmet visor overlay */
 .visor{position:fixed;top:0;left:0;right:0;bottom:0;z-index:3;pointer-events:none;
-  border:clamp(12px,3vw,30px) solid rgba(10,12,20,.75);border-radius:clamp(20px,5vw,60px);
-  box-shadow:inset 0 0 80px rgba(0,0,0,.6),inset 0 0 200px rgba(30,50,120,.06)}
-.visor::before{content:'';position:absolute;top:0;left:0;right:0;height:25%;
-  background:linear-gradient(180deg,rgba(100,150,255,.03) 0%,transparent 100%);border-radius:inherit}
-.visor::after{content:'';position:absolute;bottom:0;left:0;right:0;height:15%;
-  background:linear-gradient(0deg,rgba(180,80,20,.04) 0%,transparent 100%);border-radius:inherit}
+  border:clamp(10px,2.5vw,25px) solid rgba(15,10,8,.8);border-radius:clamp(20px,5vw,60px);
+  box-shadow:inset 0 0 60px rgba(0,0,0,.5),inset 0 0 150px rgba(120,50,10,.06)}
+.visor::before{content:'';position:absolute;top:0;left:0;right:0;height:20%;
+  background:linear-gradient(180deg,rgba(200,120,50,.04) 0%,transparent 100%);border-radius:inherit}
+.visor::after{content:'';position:absolute;bottom:0;left:0;right:0;height:20%;
+  background:linear-gradient(0deg,rgba(160,70,20,.06) 0%,transparent 100%);border-radius:inherit}
 
 /* HUD */
 .hud{position:fixed;top:0;left:0;right:0;z-index:10;display:flex;justify-content:space-between;align-items:flex-start;
@@ -217,11 +217,13 @@ const canvas=document.getElementById('gc');
 const renderer=new THREE.WebGLRenderer({canvas,antialias:true,alpha:false});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth,innerHeight);
-renderer.setClearColor(0x000005);
+renderer.setClearColor(0x1a0a04);
 renderer.shadowMap.enabled=true;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1.1;
 
 const scene=new THREE.Scene();
-scene.fog=new THREE.Fog(0x0a0205,80,250);
+scene.fog=new THREE.Fog(0x8b4020,40,180);
 
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,500);
 camera.position.set(0,3,0);
@@ -232,43 +234,36 @@ const skyGeo=new THREE.SphereGeometry(300,32,32);
 const skyCanvas=document.createElement('canvas');
 skyCanvas.width=2048;skyCanvas.height=1024;
 const sCtx=skyCanvas.getContext('2d');
-// Deep space gradient
+// Mars atmosphere gradient - warm peachy horizon, dark sky above
 const grad=sCtx.createLinearGradient(0,0,0,1024);
-grad.addColorStop(0,'#000008');
-grad.addColorStop(0.4,'#050010');
-grad.addColorStop(0.65,'#0a0015');
-grad.addColorStop(0.78,'#120510');
-grad.addColorStop(0.88,'#1a0808');
-grad.addColorStop(1,'#2a0a05');
+grad.addColorStop(0,'#0a0408');
+grad.addColorStop(0.3,'#120610');
+grad.addColorStop(0.5,'#2a0f0a');
+grad.addColorStop(0.65,'#6b2810');
+grad.addColorStop(0.75,'#a04418');
+grad.addColorStop(0.82,'#c06028');
+grad.addColorStop(0.88,'#d08040');
+grad.addColorStop(0.93,'#cc7838');
+grad.addColorStop(1,'#8b4020');
 sCtx.fillStyle=grad;sCtx.fillRect(0,0,2048,1024);
-// Stars
-for(let i=0;i<1500;i++){
-  const x=Math.random()*2048,y=Math.random()*800;
-  const s=Math.random();
-  const r=s<0.7?0.5:s<0.9?1:1.5;
+// Stars (dim, only visible in upper sky - Mars atmosphere obscures near horizon)
+for(let i=0;i<600;i++){
+  const x=Math.random()*2048,y=Math.random()*500;
+  const r=Math.random()<.8?.4:.8;
   sCtx.beginPath();sCtx.arc(x,y,r,0,Math.PI*2);
-  const bright=150+Math.floor(Math.random()*105);
-  const tint=Math.random();
-  if(tint<0.7)sCtx.fillStyle=`rgba(${bright},${bright},${bright+20},${0.5+Math.random()*0.5})`;
-  else if(tint<0.85)sCtx.fillStyle=`rgba(${bright},${bright-30},${bright+40},${0.6+Math.random()*0.4})`;
-  else sCtx.fillStyle=`rgba(${bright+20},${bright-20},${bright-40},${0.5+Math.random()*0.5})`;
+  const b=120+Math.floor(Math.random()*80);
+  sCtx.fillStyle=`rgba(${b},${b-10},${b+10},${.15+Math.random()*.25})`;
   sCtx.fill();
 }
-// Milky way band (subtle)
-sCtx.globalAlpha=0.06;
-for(let i=0;i<3000;i++){
-  const x=Math.random()*2048;
-  const y=300+Math.sin(x*0.003)*80+(Math.random()-0.5)*120;
-  sCtx.beginPath();sCtx.arc(x,y,Math.random()*1.5,0,Math.PI*2);
-  sCtx.fillStyle='#aabbff';sCtx.fill();
+// Atmospheric dust bands (Mars has dusty atmosphere layers)
+sCtx.globalAlpha=.04;
+for(let i=0;i<5;i++){
+  const y=600+i*60+Math.random()*40;
+  const g2=sCtx.createLinearGradient(0,y-30,0,y+30);
+  g2.addColorStop(0,'transparent');g2.addColorStop(.5,'#cc8844');g2.addColorStop(1,'transparent');
+  sCtx.fillStyle=g2;sCtx.fillRect(0,y-30,2048,60);
 }
 sCtx.globalAlpha=1;
-// Nebula patches
-[[500,200,'rgba(80,20,120,0.03)'],[1400,350,'rgba(20,40,100,0.025)'],[900,150,'rgba(100,30,30,0.02)']].forEach(([nx,ny,nc])=>{
-  const ng=sCtx.createRadialGradient(nx,ny,0,nx,ny,200);
-  ng.addColorStop(0,nc);ng.addColorStop(1,'transparent');
-  sCtx.fillStyle=ng;sCtx.fillRect(nx-200,ny-200,400,400);
-});
 const skyTex=new THREE.CanvasTexture(skyCanvas);
 const skyMat=new THREE.MeshBasicMaterial({map:skyTex,side:THREE.BackSide});
 const skyMesh=new THREE.Mesh(skyGeo,skyMat);
@@ -293,14 +288,18 @@ const phobos=new THREE.Mesh(phobosGeo,phobosMat);
 phobos.position.set(30,40,-60);
 scene.add(phobos);
 
-// Mars lighting
-const ambLight=new THREE.AmbientLight(0x442211,0.8);
+// Mars lighting - warm, dusty, orange tones
+const ambLight=new THREE.AmbientLight(0x8b4422,1.2);
 scene.add(ambLight);
-const sunLight=new THREE.DirectionalLight(0xffaa66,1.2);
-sunLight.position.set(50,80,30);
+const sunLight=new THREE.DirectionalLight(0xffcc88,1.8);
+sunLight.position.set(40,60,20);
 scene.add(sunLight);
-const hemiLight=new THREE.HemisphereLight(0xff6633,0x330500,0.4);
+const hemiLight=new THREE.HemisphereLight(0xdd8844,0x441100,0.6);
 scene.add(hemiLight);
+// Warm fill light from below (ground bounce)
+const fillLight=new THREE.DirectionalLight(0x884422,0.3);
+fillLight.position.set(0,-1,0);
+scene.add(fillLight);
 
 // ========== TERRAIN HEIGHT (lightweight) ==========
 function hash(x,z){const n=Math.sin(x*127.1+z*311.7)*43758.5453;return n-Math.floor(n);}
@@ -316,9 +315,19 @@ function fbm(x,z){
 }
 
 function getH(wx,wz){
-  let h=fbm(wx*.012,wz*.012)*8;
-  h+=Math.sin(wx*.02)*1.5+Math.cos(wz*.018)*1.5;
-  h+=noise2D(wx*.06,wz*.06)*.6;
+  let h=fbm(wx*.012,wz*.012)*7;
+  h+=Math.sin(wx*.02)*2+Math.cos(wz*.018)*2;
+  h+=noise2D(wx*.06,wz*.06)*.8;
+  // Occasional craters
+  const cx=Math.floor(wx*.01)*100,cz=Math.floor(wz*.01)*100;
+  const cd=hash(cx,cz);
+  if(cd>.7){
+    const ccx=cx+hash(cx+1,cz)*80,ccz=cz+hash(cx,cz+1)*80;
+    const dr=Math.sqrt((wx-ccx)**2+(wz-ccz)**2);
+    const cr=5+cd*10;
+    if(dr<cr) h-=(1-dr/cr)*3;
+    if(dr>cr&&dr<cr*1.3) h+=(1-(dr-cr)/(cr*.3))*1;
+  }
   return h-1;
 }
 
@@ -342,14 +351,20 @@ function buildTerrain(oZ){
   }
   for(let i=0;i<posAttr.count;i++){
     const h=posAttr.getZ(i);
+    const lx=posAttr.getX(i),lz=posAttr.getY(i);
     const t=Math.max(0,Math.min(1,(h+4)/12));
-    ca.setXYZ(i,.32+t*.25,.11+t*.1,.05+t*.05);
+    const n=noise2D(lx*.1,lz*.1); // texture variation
+    // Mars colors: deep red-brown to sandy orange
+    const r=.35+t*.3+n*.08;
+    const g=.12+t*.12+n*.04;
+    const b=.05+t*.04+n*.02;
+    ca.setXYZ(i,r,g,b);
   }
   ca.needsUpdate=true;
 }
 buildTerrain(0);
 
-const terrainMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.95,metalness:.05,flatShading:true});
+const terrainMat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.92,metalness:.02,flatShading:true});
 const terrain=new THREE.Mesh(terrainGeo,terrainMat);
 terrain.rotation.x=-Math.PI/2;
 scene.add(terrain);
@@ -361,20 +376,22 @@ const rockGeoCache=[
   new THREE.IcosahedronGeometry(1,0),
   new THREE.OctahedronGeometry(1,0)
 ];
+const marsRockColors=[0x6b3015,0x8b4520,0x5a2810,0x7a3818,0x9b5530,0x4a2008,0x8a4a28,0x6a3020];
 function makeRock(zBase){
-  const s=.3+Math.random()*2;
+  const s=.2+Math.random()*2.2;
   const geo=rockGeoCache[Math.floor(Math.random()*3)];
-  const mat=new THREE.MeshStandardMaterial({color:0x5b2a10+Math.floor(Math.random()*0x301000),roughness:.92,flatShading:true});
+  const col=marsRockColors[Math.floor(Math.random()*marsRockColors.length)];
+  const mat=new THREE.MeshStandardMaterial({color:col,roughness:.9+Math.random()*.1,flatShading:true});
   const m=new THREE.Mesh(geo,mat);
-  const rx=(Math.random()-.5)*60;
+  const rx=(Math.random()-.5)*50;
   const rz=zBase-(Math.random()*80);
-  m.position.set(rx,getH(rx,rz)+s*.3,rz);
-  m.scale.setScalar(s);
+  m.position.set(rx,getH(rx,rz)+s*.25,rz);
+  m.scale.set(s*(0.7+Math.random()*.6),s*(0.5+Math.random()*.5),s*(0.7+Math.random()*.6)); // varied shapes
   m.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
   scene.add(m);
   return{mesh:m,z:rz};
 }
-for(let i=0;i<50;i++) rocks.push(makeRock(20-i*3));
+for(let i=0;i<70;i++) rocks.push(makeRock(20-i*2.5));
 
 // Dust particles
 const dustCount=200;
@@ -386,7 +403,7 @@ for(let i=0;i<dustCount;i++){
   dustPos[i*3+2]=(Math.random()-.5)*60;
 }
 dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
-const dustMat=new THREE.PointsMaterial({size:.08,color:0xcc8855,transparent:true,opacity:.2,sizeAttenuation:true});
+const dustMat=new THREE.PointsMaterial({size:.12,color:0xbb6633,transparent:true,opacity:.25,sizeAttenuation:true});
 const dustPts=new THREE.Points(dustGeo,dustMat);
 scene.add(dustPts);
 
@@ -396,18 +413,20 @@ for(let i=0;i<12;i++){
   const h=10+Math.random()*25;
   const w=10+Math.random()*18;
   const mGeo=new THREE.ConeGeometry(w,h,4+Math.floor(Math.random()*3));
-  const mMat=new THREE.MeshStandardMaterial({color:0x3a1205+Math.floor(Math.random()*0x100800),roughness:1,flatShading:true});
+  const mc=[0x5a2510,0x6b3018,0x4a1a08,0x7a3820,0x8a4025][Math.floor(Math.random()*5)];
+  const mMat=new THREE.MeshStandardMaterial({color:mc,roughness:.95,flatShading:true});
   const m=new THREE.Mesh(mGeo,mMat);
   const side=i<6?-1:1;
   m.position.set(side*(60+Math.random()*40),h/2-4,(Math.random()-.5)*200);
   scene.add(m);mts.push(m);
 }
 
-// Sun (follows camera in sky)
-const sunGeo=new THREE.SphereGeometry(3,12,12);
-const sun=new THREE.Mesh(sunGeo,new THREE.MeshBasicMaterial({color:0xffddaa}));
-sun.position.set(60,70,40);
-sun.add(new THREE.Mesh(new THREE.SphereGeometry(5,12,12),new THREE.MeshBasicMaterial({color:0xffcc88,transparent:true,opacity:.1})));
+// Sun (small - Mars is 1.5x further from sun)
+const sunGeo=new THREE.SphereGeometry(2,12,12);
+const sun=new THREE.Mesh(sunGeo,new THREE.MeshBasicMaterial({color:0xffeedd}));
+sun.position.set(50,50,30);
+sun.add(new THREE.Mesh(new THREE.SphereGeometry(4,12,12),new THREE.MeshBasicMaterial({color:0xffcc88,transparent:true,opacity:.08})));
+sun.add(new THREE.Mesh(new THREE.SphereGeometry(8,12,12),new THREE.MeshBasicMaterial({color:0xffaa66,transparent:true,opacity:.03})));
 scene.add(sun);
 
 let lastTerrainZ=0;
