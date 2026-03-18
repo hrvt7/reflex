@@ -441,17 +441,18 @@ const sphereGeo=new THREE.SphereGeometry(1,24,24);
 let splatParts=[],laserBeams=[],rings=[];
 const splatGeo=new THREE.SphereGeometry(0.1,6,6);
 
-function createSplat(pos,color,count=25,force=1){
-  const em=new THREE.Color(color).multiplyScalar(0.4);
+function createSplat(pos,color,count=15,force=1){
+  count=Math.min(count,20); // cap for performance
   for(let i=0;i<count;i++){
     const mat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:1});
     const m=new THREE.Mesh(splatGeo,mat);
     m.position.copy(pos);
-    const dir=new THREE.Vector3((Math.random()-.5)*2,(Math.random()-.5)*2,(Math.random()-.5)*2).normalize();
+    const vx=((Math.random()-.5)*2),vy=((Math.random()-.5)*2),vz=((Math.random()-.5)*2);
+    const len=Math.sqrt(vx*vx+vy*vy+vz*vz)||1;
     const spd=(1+Math.random()*3)*force;
-    m.scale.setScalar(.2+Math.random()*1);
+    m.scale.setScalar(.2+Math.random()*.8);
     scene.add(m);
-    splatParts.push({mesh:m,vel:dir.multiplyScalar(spd),life:1,decay:.02+Math.random()*.02,grav:.05+Math.random()*.03});
+    splatParts.push({mesh:m,vx:vx/len*spd,vy:vy/len*spd,vz:vz/len*spd,life:1,decay:.025+Math.random()*.02,grav:.05+Math.random()*.03});
   }
 }
 function createRing(pos,color){
@@ -617,7 +618,8 @@ function spawnAlien(type,pos,lifeOvr,isChild){
   const glowMat=new THREE.MeshBasicMaterial({color:cfg.color,transparent:true,opacity:.12});
   const glow=new THREE.Mesh(sphereGeo,glowMat);glow.scale.setScalar(1.4);mesh.add(glow);
 
-  const bLight=new THREE.PointLight(cfg.color,.6,6);mesh.add(bLight);
+  // Only add lights to some aliens for performance
+  if(Math.random()<.3){const bLight=new THREE.PointLight(cfg.color,.5,5);mesh.add(bLight);}
   scene.add(mesh);
 
   const alien={
@@ -709,7 +711,7 @@ function shrinkRemove(alien){
 }
 
 function hitAlien(alien){
-  if(!alien.alive)return;
+  if(!alien.alive||!gameActive)return;
   const{type,cfg}=alien;clicks++;
 
   if(type==='danger'){
@@ -770,16 +772,17 @@ function hitAlien(alien){
 }
 
 function expireAlien(alien){
-  if(!alien.alive)return;alien.alive=false;
+  if(!alien.alive||!gameActive)return;
+  alien.alive=false;
   if(alien.type!=='danger'&&alien.type!=='powerup'){
     combo=0;misses++;
     if(gameMode==='precision'&&misses>=3){endGame();return;}
-    playMiss();showDmg();
+    playMiss();
   }
   shrinkRemove(alien);updateHUD();
 }
 
-function loseLife(){lives--;shakeScreen(10);showDmg();if(lives<=0)endGame();}
+function loseLife(){if(!gameActive)return;lives--;shakeScreen(10);showDmg();if(lives<=0)endGame();}
 function showDmg(){
   const d=document.getElementById('dmgFlash');d.classList.add('show');setTimeout(()=>d.classList.remove('show'),200);
 }
@@ -900,7 +903,7 @@ function fireShot(x,y){
   createLaser(gunPos,mT,0xff2040,false);
   clicks++;if(combo>0)combo=0;
   if(gameMode==='precision'){misses++;if(misses>=3){endGame();return;}}
-  updateHUD();playMiss();
+  if(gameActive){updateHUD();playMiss();}
 }
 
 canvas.addEventListener('pointerdown',e=>{e.preventDefault();aimX=e.clientX;aimY=e.clientY;
@@ -1016,26 +1019,30 @@ function gameLoop(){
   spawnAccum+=dt*1000;const rate=getSpawnRate();
   while(spawnAccum>=rate){spawnAccum-=rate;spawnAlien();}
 
-  // Update aliens
-  aliens.forEach(alien=>{
-    if(!alien.alive)return;
+  // Update aliens (use index loop so we can safely remove + handle endGame)
+  for(let ai=aliens.length-1;ai>=0;ai--){
+    const alien=aliens[ai];
+    // Remove dead aliens from array
+    if(!alien.alive){aliens.splice(ai,1);continue;}
+    if(!gameActive)break; // endGame was called during this loop
+
     // Scale in
     if(alien.scaleT<1){alien.scaleT=Math.min(1,alien.scaleT+rawDt*4);
       alien.mesh.scale.setScalar(alien.r*(1-Math.pow(1-alien.scaleT,3)));}
 
-    // Wobble (organic alien movement)
+    // Wobble
     const t=now*.001;const w=alien.wobble;
     if(alien.scaleT>=1){
-      const sx=alien.r*(1+Math.sin(t*alien.ps+w)*.1);
-      const sy=alien.r*(1+Math.sin(t*alien.ps*1.3+w+1)*.1);
-      const sz=alien.r*(1+Math.sin(t*alien.ps*.7+w+2)*.1);
+      const sx=alien.r*(1+Math.sin(t*alien.ps+w)*.08);
+      const sy=alien.r*(1+Math.sin(t*alien.ps*1.3+w+1)*.08);
+      const sz=alien.r*(1+Math.sin(t*alien.ps*.7+w+2)*.08);
       alien.mesh.scale.set(sx,sy,sz);
     }
 
     // Rotation
-    alien.mesh.rotation.x+=rawDt*.4*Math.sin(t+w);
-    alien.mesh.rotation.y+=rawDt*.6;
-    alien.mesh.rotation.z+=rawDt*.3*Math.cos(t*.7+w);
+    alien.mesh.rotation.x+=rawDt*.3*Math.sin(t+w);
+    alien.mesh.rotation.y+=rawDt*.5;
+    alien.mesh.rotation.z+=rawDt*.2*Math.cos(t*.7+w);
 
     // Approach player (follow terrain height)
     if(alien.approachSpeed>0){
@@ -1043,8 +1050,8 @@ function gameLoop(){
       const ax=alien.mesh.position.x,az=alien.mesh.position.z;
       const groundH=getH(ax,az);
       const minY=groundH+alien.r+.5;
-      alien.mesh.position.y=Math.max(minY,alien.mesh.position.y+Math.sin(t*2+w)*.3*dt);
-      alien.mesh.position.x+=Math.cos(t*1.5+w)*.5*dt;
+      alien.mesh.position.y=Math.max(minY,alien.mesh.position.y+Math.sin(t*2+w)*.2*dt);
+      alien.mesh.position.x+=Math.cos(t*1.5+w)*.4*dt;
     }
 
     // Phantom flicker
@@ -1056,21 +1063,27 @@ function gameLoop(){
     if(alien.mesh.position.z>camera.position.z-2&&alien.alive&&alien.type!=='powerup'){
       alien.alive=false;clearTimeout(alien.timer);
       if(alien.type==='danger'||alien.type==='boss'){
-        if(gameMode==='survival')loseLife();
+        if(gameMode==='survival'){loseLife();if(!gameActive)break;}
         combo=0;playDanger();shakeScreen(10);showDmg();
       }else{
-        combo=0;misses++;playMiss();showDmg();
+        combo=0;misses++;playMiss();
+        if(gameMode==='precision'&&misses>=3){endGame();break;}
       }
-      popAlien(alien);updateHUD();
+      popAlien(alien);aliens.splice(ai,1);updateHUD();
     }
-  });
+  }
 
   // Update splat particles
+  const spDt=rawDt*60*gameSpeed;
   for(let i=splatParts.length-1;i>=0;i--){
     const p=splatParts[i];
-    p.mesh.position.add(p.vel.clone().multiplyScalar(rawDt*60*gameSpeed));
-    p.vel.y-=p.grav*rawDt*60;p.vel.multiplyScalar(.97);p.life-=p.decay*gameSpeed;
-    p.mesh.material.opacity=p.life;
+    p.mesh.position.x+=p.vx*spDt;
+    p.mesh.position.y+=p.vy*spDt;
+    p.mesh.position.z+=p.vz*spDt;
+    p.vy-=p.grav*rawDt*60;
+    p.vx*=.97;p.vy*=.97;p.vz*=.97;
+    p.life-=p.decay*gameSpeed;
+    p.mesh.material.opacity=Math.max(0,p.life);
     if(p.life<=0){scene.remove(p.mesh);p.mesh.material.dispose();splatParts.splice(i,1);}
   }
 
@@ -1109,12 +1122,29 @@ function gameLoop(){
 }
 
 function endGame(){
+  if(!gameActive)return; // prevent double endGame
   gameActive=false;stopMusic();
   document.getElementById('hud').style.display='none';
   document.getElementById('o2Bar').style.display='none';
 
-  aliens.forEach(a=>{if(a.alive){a.alive=false;clearTimeout(a.timer);shrinkRemove(a);}});
-  laserBeams.forEach(lb=>{[lb.beam,lb.glow,lb.flash,lb.impact,lb.il,lb.ml].forEach(o=>scene.remove(o));});laserBeams=[];
+  // Clean all aliens safely
+  for(let i=0;i<aliens.length;i++){
+    const a=aliens[i];
+    clearTimeout(a.timer);
+    if(a.alive){a.alive=false;try{shrinkRemove(a);}catch(e){scene.remove(a.mesh);}}
+  }
+  aliens=[];
+  // Clean lasers
+  laserBeams.forEach(lb=>{
+    try{[lb.beam,lb.glow,lb.flash,lb.impact,lb.il,lb.ml].forEach(o=>scene.remove(o));
+    lb.beam.geometry.dispose();lb.beam.material.dispose();
+    lb.glow.geometry.dispose();lb.glow.material.dispose();
+    lb.flash.geometry.dispose();lb.flash.material.dispose();
+    lb.impact.geometry.dispose();lb.impact.material.dispose();}catch(e){}
+  });laserBeams=[];
+  // Clean splat particles
+  splatParts.forEach(p=>{try{scene.remove(p.mesh);p.mesh.material.dispose();}catch(e){}});splatParts=[];
+  rings.forEach(r=>{try{scene.remove(r.mesh);r.mesh.material.dispose();r.mesh.geometry.dispose();}catch(e){}});rings=[];
 
   const xpG=Math.round(score*.1+hits*2+maxCombo*3+bossesKilled*20);
   PD.xp+=xpG;PD.totalHits+=hits;PD.totalGames++;
