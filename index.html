@@ -223,7 +223,7 @@ renderer.toneMapping=THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure=1.1;
 
 const scene=new THREE.Scene();
-scene.fog=new THREE.Fog(0x8b4020,40,180);
+scene.fog=new THREE.Fog(0x6b3018,60,200);
 
 const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,500);
 camera.position.set(0,3,0);
@@ -315,20 +315,10 @@ function fbm(x,z){
 }
 
 function getH(wx,wz){
-  let h=fbm(wx*.012,wz*.012)*7;
-  h+=Math.sin(wx*.02)*2+Math.cos(wz*.018)*2;
-  h+=noise2D(wx*.06,wz*.06)*.8;
-  // Occasional craters
-  const cx=Math.floor(wx*.01)*100,cz=Math.floor(wz*.01)*100;
-  const cd=hash(cx,cz);
-  if(cd>.7){
-    const ccx=cx+hash(cx+1,cz)*80,ccz=cz+hash(cx,cz+1)*80;
-    const dr=Math.sqrt((wx-ccx)**2+(wz-ccz)**2);
-    const cr=5+cd*10;
-    if(dr<cr) h-=(1-dr/cr)*3;
-    if(dr>cr&&dr<cr*1.3) h+=(1-(dr-cr)/(cr*.3))*1;
-  }
-  return h-1;
+  let h=fbm(wx*.012,wz*.012)*5;
+  h+=Math.sin(wx*.025)*1.5+Math.cos(wz*.02)*1.5;
+  h+=noise2D(wx*.05,wz*.05)*.5;
+  return h;
 }
 
 // Terrain mesh - moderate resolution, static world-space
@@ -351,14 +341,8 @@ function buildTerrain(oZ){
   }
   for(let i=0;i<posAttr.count;i++){
     const h=posAttr.getZ(i);
-    const lx=posAttr.getX(i),lz=posAttr.getY(i);
-    const t=Math.max(0,Math.min(1,(h+4)/12));
-    const n=noise2D(lx*.1,lz*.1); // texture variation
-    // Mars colors: deep red-brown to sandy orange
-    const r=.35+t*.3+n*.08;
-    const g=.12+t*.12+n*.04;
-    const b=.05+t*.04+n*.02;
-    ca.setXYZ(i,r,g,b);
+    const t=Math.max(0,Math.min(1,(h+3)/10));
+    ca.setXYZ(i,.35+t*.25,.13+t*.1,.06+t*.04);
   }
   ca.needsUpdate=true;
 }
@@ -376,22 +360,20 @@ const rockGeoCache=[
   new THREE.IcosahedronGeometry(1,0),
   new THREE.OctahedronGeometry(1,0)
 ];
-const marsRockColors=[0x6b3015,0x8b4520,0x5a2810,0x7a3818,0x9b5530,0x4a2008,0x8a4a28,0x6a3020];
 function makeRock(zBase){
-  const s=.2+Math.random()*2.2;
+  const s=.3+Math.random()*1.8;
   const geo=rockGeoCache[Math.floor(Math.random()*3)];
-  const col=marsRockColors[Math.floor(Math.random()*marsRockColors.length)];
-  const mat=new THREE.MeshStandardMaterial({color:col,roughness:.9+Math.random()*.1,flatShading:true});
+  const mat=new THREE.MeshStandardMaterial({color:0x6b3015+Math.floor(Math.random()*0x200800),roughness:.92,flatShading:true});
   const m=new THREE.Mesh(geo,mat);
   const rx=(Math.random()-.5)*50;
   const rz=zBase-(Math.random()*80);
-  m.position.set(rx,getH(rx,rz)+s*.25,rz);
-  m.scale.set(s*(0.7+Math.random()*.6),s*(0.5+Math.random()*.5),s*(0.7+Math.random()*.6)); // varied shapes
+  m.position.set(rx,getH(rx,rz)+s*.3,rz);
+  m.scale.setScalar(s);
   m.rotation.set(Math.random()*3,Math.random()*3,Math.random()*3);
   scene.add(m);
-  return{mesh:m,z:rz};
+  return{mesh:m,z:rz,s};
 }
-for(let i=0;i<70;i++) rocks.push(makeRock(20-i*2.5));
+for(let i=0;i<50;i++) rocks.push(makeRock(20-i*3));
 
 // Dust particles
 const dustCount=200;
@@ -413,8 +395,8 @@ for(let i=0;i<12;i++){
   const h=10+Math.random()*25;
   const w=10+Math.random()*18;
   const mGeo=new THREE.ConeGeometry(w,h,4+Math.floor(Math.random()*3));
-  const mc=[0x5a2510,0x6b3018,0x4a1a08,0x7a3820,0x8a4025][Math.floor(Math.random()*5)];
-  const mMat=new THREE.MeshStandardMaterial({color:mc,roughness:.95,flatShading:true});
+  const mtCol=[0x5a2510,0x6b3018,0x4a1a08,0x7a3820,0x8a4025][Math.floor(Math.random()*5)];
+  const mMat=new THREE.MeshStandardMaterial({color:mtCol,roughness:.95,flatShading:true});
   const m=new THREE.Mesh(mGeo,mMat);
   const side=i<6?-1:1;
   m.position.set(side*(60+Math.random()*40),h/2-4,(Math.random()-.5)*200);
@@ -515,7 +497,7 @@ let gameActive=false,gameMode='blitz',gameSpeed=1;
 let aliens=[],spawnAccum=0,activePU={};
 let soundEnabled=true,musicPlaying=false,musicNodes=[];
 let screenShake={i:0};
-let moveSpeed=8,playerZ=0;
+let moveSpeed=5,playerZ=0;
 
 let PD=JSON.parse(localStorage.getItem('nsData3')||'null')||{
   level:1,xp:0,highscores:{blitz:0,survival:0,zen:0,precision:0},totalHits:0,totalGames:0,achievements:[]
@@ -572,12 +554,12 @@ function stopMusic(){musicPlaying=false;musicNodes.forEach(n=>{try{n.stop();}cat
 
 // ========== ALIEN CONFIG ==========
 const AT={
-  normal: {pts:10,life:4000,freq:600,color:0x00ff88,r:1,name:'Grub'},
-  fast:   {pts:25,life:2000,freq:900,color:0xff00ff,r:.7,name:'Zapper'},
-  bonus:  {pts:50,life:3000,freq:500,color:0xffe600,r:.9,name:'Goldling'},
-  danger: {pts:-30,life:5000,freq:0,color:0xff2040,r:1.3,name:'Spiker'},
-  phantom:{pts:35,life:3500,freq:800,color:0x4488ff,r:1,name:'Ghost'},
-  splitter:{pts:20,life:3800,freq:700,color:0xff8800,r:1.2,name:'Divider'},
+  normal: {pts:10,life:4500,freq:600,color:0x00ff88,r:1.3,name:'Grub'},
+  fast:   {pts:25,life:2200,freq:900,color:0xff00ff,r:1,name:'Zapper'},
+  bonus:  {pts:50,life:3500,freq:500,color:0xffe600,r:1.2,name:'Goldling'},
+  danger: {pts:-30,life:5500,freq:0,color:0xff2040,r:1.5,name:'Spiker'},
+  phantom:{pts:35,life:4000,freq:800,color:0x4488ff,r:1.2,name:'Ghost'},
+  splitter:{pts:20,life:4000,freq:700,color:0xff8800,r:1.4,name:'Divider'},
 };
 const PUT={
   slowmo:{icon:'S',name:'SLOW-MO',dur:4000,color:'#ffe600'},
@@ -607,7 +589,7 @@ function spawnAlien(type,pos,lifeOvr,isChild){
 
   if(!pos){
     const a=(Math.random()-.5)*2;
-    const dist=20+Math.random()*30;
+    const dist=15+Math.random()*25;
     const spX=a*15;
     const spZ=camera.position.z-dist;
     const groundH=getH(spX,spZ);
@@ -950,8 +932,8 @@ function startGame(mode){
   // Reset rocks around start
   rocks.forEach((r,i)=>{
     r.z=-i*3;
-    const rx=(Math.random()-.5)*60;
-    r.mesh.position.set(rx,getH(rx,r.z)+r.mesh.scale.x*.3,r.z);
+    const rx=(Math.random()-.5)*50;
+    r.mesh.position.set(rx,getH(rx,r.z)+r.s*.3,r.z);
   });
   document.getElementById('startScr').classList.add('hidden');
   document.getElementById('endScr').classList.add('hidden');
@@ -986,8 +968,8 @@ function gameLoop(){
 
   // Camera Y follows terrain smoothly
   const camH=getH(0,playerZ);
-  const targetY=camH+2.5;
-  camera.position.y+=(targetY-camera.position.y)*.12;
+  const targetY=camH+2.2;
+  camera.position.y+=(targetY-camera.position.y)*.15;
 
   // Gentle slope tilt
   const hA=getH(0,playerZ-1.5);
@@ -1003,8 +985,8 @@ function gameLoop(){
   rocks.forEach(r=>{
     if(r.z>playerZ+20){
       r.z=playerZ-60-Math.random()*40;
-      const rx=(Math.random()-.5)*60;
-      r.mesh.position.set(rx,getH(rx,r.z)+r.mesh.scale.x*.3,r.z);
+      const rx=(Math.random()-.5)*50;
+      r.mesh.position.set(rx,getH(rx,r.z)+r.s*.3,r.z);
     }
   });
 
