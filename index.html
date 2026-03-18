@@ -713,20 +713,24 @@ function hitAlien(alien){
   const{type,cfg}=alien;clicks++;
 
   if(type==='danger'){
-    if(activePU.shield){popAlien(alien);playHit(400);showFloat(alien.mesh.position,'BLOCKED','#4488ff');}
-    else{
+    if(activePU.shield){
+      alien.alive=false;clearTimeout(alien.timer);
+      const p=alien.mesh.position.clone();
+      popAlien(alien);playHit(400);showFloat(p,'BLOCKED','#4488ff');
+    }else{
       alien.alive=false;clearTimeout(alien.timer);combo=0;
       if(gameMode==='survival')loseLife();
       else if(gameMode==='precision'){misses++;if(misses>=3){endGame();return;}}
       else score=Math.max(0,score+cfg.pts);
-      playDanger();popAlien(alien);showFloat(alien.mesh.position,cfg.pts,'#ff2040');
+      const dp=alien.mesh.position.clone();
+      playDanger();popAlien(alien);showFloat(dp,cfg.pts,'#ff2040');
       shakeScreen(8);showDmg();
     }
   }else if(type==='powerup'){
     alien.alive=false;clearTimeout(alien.timer);
     popAlien(alien);activatePU(alien.puType);playPowerup();
   }else if(type==='boss'){
-    alien.hp--;clicks++;hits++;
+    alien.hp--;hits++;
     playBossHit();shakeScreen(4);
     createSplat(alien.mesh.position.clone(),0xff0066,8,.7);
     combo++;if(combo>maxCombo)maxCombo=combo;
@@ -735,11 +739,12 @@ function hitAlien(alien){
     if(alien.hp<=0){
       alien.alive=false;clearTimeout(alien.timer);bossesKilled++;
       const bp=Math.round(cfg.pts*m);score+=bp;
+      const bpos=alien.mesh.position.clone();
       playBossDie();shakeScreen(15);popAlien(alien);
-      showFloat(alien.mesh.position.clone().add(new THREE.Vector3(0,1,0)),bp,'#ffe600');
+      showFloat(bpos.clone().add(new THREE.Vector3(0,1,0)),bp,'#ffe600');
       showBanner('BOSS ELIMINATED','#ff0066');
       checkAch('boss','BOSS SLAYER','Eliminated a boss');
-      spawnPU(alien.mesh.position.clone());
+      spawnPU(bpos);
     }else{
       alien.mesh.material.emissiveIntensity=3;
       setTimeout(()=>{if(alien.mesh.material)alien.mesh.material.emissiveIntensity=.8;},80);
@@ -750,16 +755,16 @@ function hitAlien(alien){
     alien.alive=false;clearTimeout(alien.timer);
     hits++;totalHW++;combo++;if(combo>maxCombo)maxCombo=combo;
     const m=getMult(),pts=Math.round(cfg.pts*m);score+=pts;
+    const hp=alien.mesh.position.clone();
     playHit(cfg.freq);popAlien(alien);
-    showFloat(alien.mesh.position,'+'+ pts,'#'+new THREE.Color(cfg.color).getHexString());
+    showFloat(hp,'+'+pts,'#'+new THREE.Color(cfg.color).getHexString());
     if(combo>=5)shakeScreen(2+Math.min(combo*.2,5));
     checkComboMs();
     if(type==='splitter'&&!alien.isChild){
-      const p=alien.mesh.position;
-      spawnAlien('normal',p.clone().add(new THREE.Vector3(-2,.5,-2)),1800,true);
-      spawnAlien('normal',p.clone().add(new THREE.Vector3(2,.5,-2)),1800,true);
+      spawnAlien('normal',hp.clone().add(new THREE.Vector3(-2,.5,-2)),1800,true);
+      spawnAlien('normal',hp.clone().add(new THREE.Vector3(2,.5,-2)),1800,true);
     }
-    if(Math.random()<.04+wave*.004)spawnPU(alien.mesh.position.clone());
+    if(Math.random()<.04+wave*.004)spawnPU(hp);
   }
   updateHUD();
 }
@@ -918,7 +923,14 @@ function startGame(mode){
   laserBeams.forEach(lb=>{scene.remove(lb.beam);scene.remove(lb.glow);scene.remove(lb.flash);scene.remove(lb.impact);scene.remove(lb.il);scene.remove(lb.ml);});laserBeams=[];
   rings.forEach(r=>scene.remove(r.mesh));rings=[];
 
-  camera.position.set(0,3,0);
+  camera.position.set(0,3,0);camera.rotation.set(0,0,0);
+  lastTerrainZ=0;buildTerrain(0);terrain.position.z=0;
+  // Reset rocks around start
+  rocks.forEach((r,i)=>{
+    r.z=-i*3;
+    const rx=(Math.random()-.5)*60;
+    r.mesh.position.set(rx,getH(rx,r.z)+r.mesh.scale.x*.3,r.z);
+  });
   document.getElementById('startScr').classList.add('hidden');
   document.getElementById('endScr').classList.add('hidden');
   document.getElementById('hud').style.display='flex';
@@ -1025,10 +1037,13 @@ function gameLoop(){
     alien.mesh.rotation.y+=rawDt*.6;
     alien.mesh.rotation.z+=rawDt*.3*Math.cos(t*.7+w);
 
-    // Approach player
+    // Approach player (follow terrain height)
     if(alien.approachSpeed>0){
       alien.mesh.position.z+=alien.approachSpeed*dt*3;
-      alien.mesh.position.y+=Math.sin(t*2+w)*.3*dt;
+      const ax=alien.mesh.position.x,az=alien.mesh.position.z;
+      const groundH=getH(ax,az);
+      const minY=groundH+alien.r+.5;
+      alien.mesh.position.y=Math.max(minY,alien.mesh.position.y+Math.sin(t*2+w)*.3*dt);
       alien.mesh.position.x+=Math.cos(t*1.5+w)*.5*dt;
     }
 
@@ -1083,11 +1098,11 @@ function gameLoop(){
     if(r.life<=0){scene.remove(r.mesh);r.mesh.material.dispose();r.mesh.geometry.dispose();rings.splice(i,1);}
   }
 
-  // Camera shake
+  // Camera shake (additive, doesn't override terrain-follow)
   if(screenShake.i>0){
     camera.position.x+=(Math.random()-.5)*screenShake.i*.04;
     camera.position.y+=(Math.random()-.5)*screenShake.i*.04;
-    screenShake.i*=.88;if(screenShake.i<.3){screenShake.i=0;camera.position.x=0;camera.position.y=3;}
+    screenShake.i*=.88;if(screenShake.i<.3)screenShake.i=0;
   }
 
   updateHUD();renderer.render(scene,camera);
